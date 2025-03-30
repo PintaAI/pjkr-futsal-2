@@ -18,6 +18,44 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Project Structure
+
+This project follows a monorepo-like structure within a single repository, separating the frontend and backend concerns:
+
+-   **Frontend (Next.js):** Located primarily in the `app/`, `components/`, `lib/`, and `public/` directories. This handles the user interface, routing, and client-side interactions.
+-   **Backend (Socket.IO Server):** Located in the `server/` directory. This is a separate Node.js/Express/TypeScript application responsible for handling real-time WebSocket connections using Socket.IO. This separation allows the backend to be deployed and scaled independently if needed.
+
+## Real-time Features (Socket.IO)
+
+Real-time updates (e.g., live match scores, user connection status) are handled by the dedicated Socket.IO server in the `server/` directory.
+
+### Running the Socket.IO Server
+
+To run the Socket.IO server for development (after installing dependencies with `npm install`):
+
+1.  **Build the server:**
+    ```bash
+    npm run build:server
+    ```
+2.  **Start the server:**
+    ```bash
+    npm run start:server
+    ```
+    The server will typically run on port 3001 (check `server/src/index.ts` and console output).
+
+*(Note: The `npm run dev:server` script using `ts-node-dev` is currently experiencing issues with ES Module resolution and should not be used.)*
+
+### Running Both Frontend and Backend
+
+For development, you'll usually need both the Next.js frontend server and the Socket.IO backend server running simultaneously:
+
+-   Terminal 1: `npm run dev` (Starts Next.js frontend on port 3000)
+-   Terminal 2: `npm run start:server` (Starts Socket.IO backend on port 3001, requires building first)
+
+### Socket.IO Test Component
+
+A test component (`components/socket-test.tsx`) is included on the home page (`app/page.tsx`) to demonstrate basic Socket.IO functionality. It shows connection status, connected user count/IDs, and includes a button to trigger a test event via the backend.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

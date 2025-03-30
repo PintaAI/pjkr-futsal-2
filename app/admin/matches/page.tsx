@@ -1,9 +1,10 @@
 import Link from "next/link"
+import { Plus, Eye, Pencil } from "lucide-react"
 
 // Mock data for demonstration - this would come from a database in a real app
 const MOCK_TEAMS = [
-  { id: 1, name: "Team A", color: "#ff0000" },
-  { id: 2, name: "Team B", color: "#0000ff" },
+  { id: 1, name: "Pjkr Futsal", color: "#ff0000" },
+  { id: 2, name: "Pasoepati", color: "#0000ff" },
   { id: 3, name: "Team C", color: "#00ff00" },
   { id: 4, name: "Team D", color: "#ffff00" }
 ];
@@ -32,65 +33,76 @@ type Match = typeof MOCK_MATCHES[0];
 
 export default function AdminMatchesPage() {
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 space-y-4 md:p-6 md:space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Matches</h2>
-        <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90">
+        <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-2 w-full sm:w-auto">
+          <Plus className="h-4 w-4" />
           New Match
         </button>
       </div>
       
-      <div className="rounded-md border">
-        <div className="p-4">
-          <div className="relative w-full overflow-auto">
+      <div className="rounded-md border overflow-x-auto">
             <table className="w-full caption-bottom text-sm">
               <thead className="[&_tr]:border-b">
-                <tr className="border-b transition-colors">
-                  <th className="h-12 px-4 text-left align-middle font-medium">Match</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium">Status</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium">Date</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium">Actions</th>
+                <tr className="border-b transition-colors bg-muted/50">
+                  <th className="h-10 px-4 text-left align-middle font-medium whitespace-nowrap">Match</th>
+                  <th className="h-10 px-4 text-left align-middle font-medium hidden md:table-cell">Status</th>
+                  <th className="h-10 px-4 text-left align-middle font-medium hidden sm:table-cell">Date</th>
+                  <th className="h-10 px-4 text-right align-middle font-medium sm:text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="[&_tr:last-child]:border-0">
                 {MOCK_MATCHES.map((match) => (
                   <tr key={match.id} className="border-b transition-colors hover:bg-muted/50">
                     <td className="p-4 align-middle">
-                      <div>
-                        <div className="font-medium">
-                          <span className="inline-block w-3 h-3 rounded-full mr-2" style={{ backgroundColor: match.homeTeam.color }}></span>
-                          {match.homeTeam.name} vs {match.awayTeam.name}
+                      <div className="flex flex-col">
+                        <div className="font-medium flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: match.homeTeam.color }}></span>
+                          {match.homeTeam.name}
+                          <span className="text-muted-foreground">vs</span>
+                          {match.awayTeam.name}
                         </div>
-                        <div className="text-sm text-muted-foreground">
-                          {match.stage} - Group {match.group}
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Group {match.group}
                         </div>
                       </div>
                     </td>
-                    <td className="p-4 align-middle">
-                      <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+                    <td className="p-4 align-middle hidden md:table-cell">
+                      <span className="text-xs bg-secondary/40 rounded-full px-2 py-1">
                         Upcoming
+                      </span>
+                    </td>
+                    <td className="p-4 align-middle hidden sm:table-cell whitespace-nowrap">
+                      <div className="text-sm">
+                        {new Date(match.dateTime).toLocaleDateString('en-US', { 
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                        {' '}
+                        {new Date(match.dateTime).toLocaleTimeString('en-US', { 
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true
+                        })}
                       </div>
                     </td>
                     <td className="p-4 align-middle">
-                      <div>
-                        <div className="font-medium">
-                          {new Date(match.dateTime).toLocaleDateString()}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {new Date(match.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 align-middle">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-end gap-2 sm:justify-start">
                         <Link
                           href={`/admin/matches/${match.id}`}
-                          className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input hover:bg-accent hover:text-accent-foreground h-9 px-3"
+                          className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 w-9 sm:w-auto sm:px-3 hover:bg-accent hover:text-accent-foreground"
+                          title="View match"
                         >
-                          View
+                          <Eye className="h-4 w-4" />
+                          <span className="hidden sm:block sm:ml-2">View</span>
                         </Link>
-                        <button className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input hover:bg-accent hover:text-accent-foreground h-9 px-3">
-                          Edit
+                        <button 
+                          className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 w-9 sm:w-auto sm:px-3 hover:bg-accent hover:text-accent-foreground"
+                          title="Edit match"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          <span className="hidden sm:block sm:ml-2">Edit</span>
                         </button>
                       </div>
                     </td>
@@ -99,8 +111,6 @@ export default function AdminMatchesPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
     </div>
   )
 }
