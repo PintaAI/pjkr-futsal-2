@@ -1,12 +1,27 @@
 import express from 'express';
 import http from 'http';
-import { Server as SocketIOServer, Socket } from 'socket.io'; // Import Socket type
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import cors from 'cors';
 
 const app = express();
 const server = http.createServer(app);
-const connectedClients = new Map<string, Socket>(); // Use a Map to store sockets by ID
-let triggerCount = 0; // Shared counter state on the server
+const connectedClients = new Map<string, Socket>();
+
+// In-memory storage for match states
+interface MatchState {
+  matchId: string;
+  matchStarted: boolean;
+  matchClockRunning: boolean;
+  matchTime: number;
+  homeScore: number;
+  awayScore: number;
+  possessionTeam: number | null;
+  homeTeamPossessionTime: number;
+  awayTeamPossessionTime: number;
+  events: any[];
+}
+
+const matchStates = new Map<string, MatchState>();
 
 // Configure CORS for Socket.IO
 const io = new SocketIOServer(server, {
@@ -26,15 +41,6 @@ app.get('/', (req, res) => {
   res.send('Socket.IO Server is running!');
 });
 
-// Test route to increment counter and emit update
-app.get('/api/test-socket', (req, res) => {
-  triggerCount++; // Increment the counter
-  console.log(`[${new Date().toISOString()}] Test route hit. Incrementing counter to ${triggerCount}. Emitting 'update-counter'...`);
-  // Emit the new count to all connected clients
-  io.emit('update-counter', { count: triggerCount });
-  res.status(200).json({ message: `Counter incremented to ${triggerCount}` });
-});
-
 // Helper function to broadcast the updated user list
 const broadcastUserList = () => {
   const userIds = Array.from(connectedClients.keys());
@@ -43,28 +49,98 @@ const broadcastUserList = () => {
 };
 
 // Socket.IO connection handling
-io.on('connection', (socket: Socket) => { // Add type annotation for socket
+io.on('connection', (socket: Socket) => {
   console.log(`[${new Date().toISOString()}] User connected: ${socket.id}`);
-  connectedClients.set(socket.id, socket); // Add client to map
-  broadcastUserList(); // Send updated list to everyone
+  connectedClients.set(socket.id, socket);
+
+  // Join match room
+  socket.on('join-match', (matchId: string) => {
+    console.log(`[${new Date().toISOString()}] User ${socket.id} joined match ${matchId}`);
+    socket.join(`match:${matchId}`);
+    
+    // Send current match state if it exists
+    const matchState = matchStates.get(matchId);
+    if (matchState) {
+      socket.emit('match-state', matchState);
+    }
+  });
+
+  // Handle match clock updates
+  socket.on('update-match-clock', ({ matchId, running, time }: { matchId: string; running: boolean; time: number }) => {
+    console.log(`[${new Date().toISOString()}] Match ${matchId} clock update - running: ${running}, time: ${time}`);
+    
+    let matchState = matchStates.get(matchId);
+    if (!matchState) {
+      matchState = {
+        matchId,
+        matchStarted: true,
+        matchClockRunning: running,
+        matchTime: time,
+        homeScore: 0,
+        awayScore: 0,
+        possessionTeam: null,
+        homeTeamPossessionTime: 0,
+        awayTeamPossessionTime: 0,
+        events: []
+      };
+      matchStates.set(matchId, matchState);
+    } else {
+      matchState.matchClockRunning = running;
+      matchState.matchTime = time;
+    }
+
+    io.to(`match:${matchId}`).emit('match-state', matchState);
+  });
+
+  // Handle score updates
+  socket.on('update-score', ({ matchId, homeScore, awayScore }: { matchId: string; homeScore: number; awayScore: number }) => {
+    console.log(`[${new Date().toISOString()}] Match ${matchId} score update - home: ${homeScore}, away: ${awayScore}`);
+    
+    const matchState = matchStates.get(matchId);
+    if (matchState) {
+      matchState.homeScore = homeScore;
+      matchState.awayScore = awayScore;
+      io.to(`match:${matchId}`).emit('match-state', matchState);
+    }
+  });
+
+  // Handle possession updates
+  socket.on('update-possession', ({ matchId, team, homeTime, awayTime }: { matchId: string; team: number | null; homeTime: number; awayTime: number }) => {
+    console.log(`[${new Date().toISOString()}] Match ${matchId} possession update - team: ${team}, home: ${homeTime}, away: ${awayTime}`);
+    
+    const matchState = matchStates.get(matchId);
+    if (matchState) {
+      matchState.possessionTeam = team;
+      matchState.homeTeamPossessionTime = homeTime;
+      matchState.awayTeamPossessionTime = awayTime;
+      io.to(`match:${matchId}`).emit('match-state', matchState);
+    }
+  });
+
+  // Handle match events
+  socket.on('record-event', ({ matchId, event }: { matchId: string; event: any }) => {
+    console.log(`[${new Date().toISOString()}] Match ${matchId} new event:`, event);
+    
+    const matchState = matchStates.get(matchId);
+    if (matchState) {
+      matchState.events.push(event);
+      io.to(`match:${matchId}`).emit('match-state', matchState);
+    }
+  });
+
+  // Handle match reset
+  socket.on('reset-match', (matchId: string) => {
+    console.log(`[${new Date().toISOString()}] Match ${matchId} reset`);
+    
+    matchStates.delete(matchId);
+    io.to(`match:${matchId}`).emit('match-reset');
+  });
 
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`[${new Date().toISOString()}] User disconnected: ${socket.id}`);
-    connectedClients.delete(socket.id); // Remove client from map
-    broadcastUserList(); // Send updated list to everyone
+    connectedClients.delete(socket.id);
   });
-
-  // Example: Listen for a message from a client
-  socket.on('client-message', (data) => {
-    console.log(`[${new Date().toISOString()}] Message from ${socket.id}:`, data);
-    // Example: Broadcast message to other clients (excluding sender)
-    // socket.broadcast.emit('server-message', { sender: socket.id, message: data });
-  });
-
-  // Send a welcome message and the current counter state to the newly connected client
-  socket.emit('welcome', { message: `Welcome! You are connected with ID: ${socket.id}` });
-  socket.emit('update-counter', { count: triggerCount }); // Send current count on connect
 });
 
 const PORT = process.env.SOCKET_PORT || 3001; // Use an environment variable or default

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { Socket, io } from "socket.io-client";
 import { EventRecording } from "./components/event-recording";
 import { MatchInfo } from "./components/match-info";
 import { MatchSummary } from "./components/match-summary";
@@ -49,6 +50,7 @@ interface MatchTrackingProps {
 }
 
 export function MatchTracking({ matchId }: MatchTrackingProps) {
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [matchStarted, setMatchStarted] = useState(false);
   const [matchEvents, setMatchEvents] = useState<MatchEvent[]>([]);
@@ -66,6 +68,58 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
   const [matchClockRunning, setMatchClockRunning] = useState(false);
   const [matchTimerId, setMatchTimerId] = useState<NodeJS.Timeout | null>(null);
 
+  // Initialize socket connection
+  useEffect(() => {
+    const newSocket = io("http://localhost:3001");
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.close();
+    };
+  }, []);
+
+  // Join match room and handle socket events
+  useEffect(() => {
+    if (!socket) return;
+
+    // Join match room
+    socket.emit("join-match", matchId);
+
+    // Listen for match state updates
+    socket.on("match-state", (state) => {
+      setMatchStarted(state.matchStarted);
+      setMatchClockRunning(state.matchClockRunning);
+      setMatchTime(state.matchTime);
+      setHomeScore(state.homeScore);
+      setAwayScore(state.awayScore);
+      setPossessionTeam(state.possessionTeam);
+      setHomeTeamPossessionTime(state.homeTeamPossessionTime);
+      setAwayTeamPossessionTime(state.awayTeamPossessionTime);
+      setMatchEvents(state.events);
+    });
+
+    // Listen for match reset from other clients
+    socket.on("match-reset", () => {
+      // Reset all state
+      if (matchTimerId) clearInterval(matchTimerId);
+      setMatchClockRunning(false);
+      setMatchStarted(false);
+      setMatchTime(0);
+      setHomeScore(0);
+      setAwayScore(0);
+      setMatchEvents([]);
+      setHomeTeamPossessionTime(0);
+      setAwayTeamPossessionTime(0);
+      setPossessionTeam(null);
+      setPossessionStartTime(null);
+    });
+
+    return () => {
+      socket.off("match-state");
+      socket.off("match-reset");
+    };
+  }, [socket, matchId]);
+
   // Set initial match data
   useEffect(() => {
     const match = MOCK_MATCHES.find(m => m.id.toString() === matchId);
@@ -73,7 +127,7 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
   }, [matchId]);
   
   // Start/stop match timer
-  const toggleMatchClock = () => {
+  const toggleMatchClock = useCallback(() => {
     if (matchClockRunning) {
       if (matchTimerId) clearInterval(matchTimerId);
       setMatchClockRunning(false);
@@ -84,15 +138,38 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
         setPossessionTeam(null);
         setPossessionStartTime(null);
       }
+
+      // Emit clock update
+      socket?.emit("update-match-clock", {
+        matchId,
+        running: false,
+        time: matchTime
+      });
     } else {
       const timerId = setInterval(() => {
-        setMatchTime(prev => prev + 1);
+        setMatchTime(prev => {
+          const newTime = prev + 1;
+          // Emit clock update
+          socket?.emit("update-match-clock", {
+            matchId,
+            running: true,
+            time: newTime
+          });
+          return newTime;
+        });
       }, 1000);
       setMatchTimerId(timerId);
       setMatchClockRunning(true);
       setMatchStarted(true);
+
+      // Initial clock update emit
+      socket?.emit("update-match-clock", {
+        matchId,
+        running: true,
+        time: matchTime
+      });
     }
-  };
+  }, [matchClockRunning, matchTimerId, matchTime, socket, matchId, possessionTeam]);
   
   // Cleanup interval on unmount
   useEffect(() => {
@@ -121,33 +198,70 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
   };
   
   // Update possession time when switching possession
-  const updatePossessionTime = () => {
+  const updatePossessionTime = useCallback(() => {
     if (possessionTeam === null || possessionStartTime === null) return;
     
     const currentTime = Date.now();
     const possessionDuration = Math.round((currentTime - possessionStartTime) / 1000);
     
-    if (possessionTeam === selectedMatch?.homeTeam.id) {
-      setHomeTeamPossessionTime(prev => prev + possessionDuration);
-    } else {
-      setAwayTeamPossessionTime(prev => prev + possessionDuration);
-    }
-  };
+    // Calculate new possession times
+    const newHomeTime = possessionTeam === selectedMatch?.homeTeam.id 
+      ? homeTeamPossessionTime + possessionDuration 
+      : homeTeamPossessionTime;
+      
+    const newAwayTime = possessionTeam === selectedMatch?.awayTeam.id
+      ? awayTeamPossessionTime + possessionDuration
+      : awayTeamPossessionTime;
+    
+    // Update state with new times
+    setHomeTeamPossessionTime(newHomeTime);
+    setAwayTeamPossessionTime(newAwayTime);
+
+    // Emit possession update with calculated times
+    socket?.emit("update-possession", {
+      matchId,
+      team: possessionTeam,
+      homeTime: newHomeTime,
+      awayTime: newAwayTime
+    });
+  }, [possessionTeam, possessionStartTime, selectedMatch, socket, matchId, homeTeamPossessionTime, awayTeamPossessionTime]);
   
   // Handle possession change
-  const handlePossessionChange = (teamId: number) => {
+  const handlePossessionChange = useCallback((teamId: number) => {
     if (!matchClockRunning) return;
     
-    if (possessionTeam !== null) {
-      updatePossessionTime();
+    let newHomeTime = homeTeamPossessionTime;
+    let newAwayTime = awayTeamPossessionTime;
+    
+    // Update current possession time if any
+    if (possessionTeam !== null && possessionStartTime !== null) {
+      const currentTime = Date.now();
+      const possessionDuration = Math.round((currentTime - possessionStartTime) / 1000);
+      
+      if (possessionTeam === selectedMatch?.homeTeam.id) {
+        newHomeTime += possessionDuration;
+      } else if (possessionTeam === selectedMatch?.awayTeam.id) {
+        newAwayTime += possessionDuration;
+      }
     }
     
+    // Update states
+    setHomeTeamPossessionTime(newHomeTime);
+    setAwayTeamPossessionTime(newAwayTime);
     setPossessionTeam(teamId);
     setPossessionStartTime(Date.now());
-  };
+
+    // Emit possession update with latest times
+    socket?.emit("update-possession", {
+      matchId,
+      team: teamId,
+      homeTime: newHomeTime,
+      awayTime: newAwayTime
+    });
+  }, [matchClockRunning, possessionTeam, updatePossessionTime, socket, matchId, homeTeamPossessionTime, awayTeamPossessionTime]);
   
   // Record a match event
-  const recordEvent = (type: MatchEvent["type"], teamId: number) => {
+  const recordEvent = useCallback((type: MatchEvent["type"], teamId: number) => {
     if (!selectedMatch || !matchStarted) return;
     
     const newEvent: MatchEvent = {
@@ -163,15 +277,39 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
     // Update score for goals
     if (type === "goal") {
       if (teamId === selectedMatch.homeTeam.id) {
-        setHomeScore(prev => prev + 1);
+        setHomeScore(prev => {
+          const newScore = prev + 1;
+          // Emit score update
+          socket?.emit("update-score", {
+            matchId,
+            homeScore: newScore,
+            awayScore
+          });
+          return newScore;
+        });
       } else {
-        setAwayScore(prev => prev + 1);
+        setAwayScore(prev => {
+          const newScore = prev + 1;
+          // Emit score update
+          socket?.emit("update-score", {
+            matchId,
+            homeScore,
+            awayScore: newScore
+          });
+          return newScore;
+        });
       }
     }
-  };
+
+    // Emit event
+    socket?.emit("record-event", {
+      matchId,
+      event: newEvent
+    });
+  }, [selectedMatch, matchStarted, matchTime, socket, matchId, homeScore, awayScore]);
   
   // Reset the match
-  const resetMatch = () => {
+  const resetMatch = useCallback(() => {
     if (matchTimerId) clearInterval(matchTimerId);
     setMatchClockRunning(false);
     setMatchStarted(false);
@@ -183,18 +321,29 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
     setAwayTeamPossessionTime(0);
     setPossessionTeam(null);
     setPossessionStartTime(null);
-  };
+
+    // Emit reset
+    socket?.emit("reset-match", matchId);
+  }, [matchTimerId, socket, matchId]);
   
   // Handle pausing possession
-  const handlePausePossession = () => {
+  const handlePausePossession = useCallback(() => {
     if (!matchClockRunning) return;
     
     if (possessionTeam !== null) {
       updatePossessionTime();
       setPossessionTeam(null);
       setPossessionStartTime(null);
+
+      // Emit possession update
+      socket?.emit("update-possession", {
+        matchId,
+        team: null,
+        homeTime: homeTeamPossessionTime,
+        awayTime: awayTeamPossessionTime
+      });
     }
-  };
+  }, [matchClockRunning, possessionTeam, updatePossessionTime, socket, matchId, homeTeamPossessionTime, awayTeamPossessionTime]);
 
   const possessionPercentages = calculatePossessionPercentage();
 
@@ -228,6 +377,13 @@ export function MatchTracking({ matchId }: MatchTrackingProps) {
           
           // Update match status to completed
           setMatchStarted(false);
+
+          // Emit clock update
+          socket?.emit("update-match-clock", {
+            matchId,
+            running: false,
+            time: matchTime
+          });
         }}
       />
       
